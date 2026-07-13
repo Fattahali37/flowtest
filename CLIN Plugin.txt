@@ -1,0 +1,93 @@
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using System;
+
+namespace JDI.Plugins
+{
+    public class GenerateClinNumber : IPlugin
+    {
+        public void Execute(IServiceProvider serviceProvider)
+        {
+            IPluginExecutionContext context =
+                (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
+
+            ITracingService tracingService =
+                (ITracingService)serviceProvider.GetService(typeof(ITracingService));
+
+            if (!context.InputParameters.Contains("Target") ||
+                !(context.InputParameters["Target"] is Entity target))
+            {
+                return;
+            }
+
+            if (target.LogicalName != "quotedetail")
+            {
+                return;
+            }
+
+          
+            if (context.MessageName != "Create")
+            {
+                return;
+            }
+
+            if (!target.Contains("quoteid"))
+            {
+                tracingService.Trace("quoteid not found on target.");
+                return;
+            }
+
+            EntityReference quoteRef = target.GetAttributeValue<EntityReference>("quoteid");
+
+            if (quoteRef == null)
+            {
+                return;
+            }
+
+            // Do not overwrite if value is already provided
+            if (target.Contains("new_clintotal") &&
+                !string.IsNullOrWhiteSpace(target.GetAttributeValue<string>("new_clintotal")))
+            {
+                return;
+            }
+
+            IOrganizationServiceFactory serviceFactory =
+                (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
+
+            IOrganizationService service =
+                serviceFactory.CreateOrganizationService(context.UserId);
+
+            QueryExpression query = new QueryExpression("quotedetail")
+            {
+                ColumnSet = new ColumnSet("new_clintotal")
+            };
+
+            query.Criteria.AddCondition("quoteid", ConditionOperator.Equal, quoteRef.Id);
+
+            EntityCollection existingLines = service.RetrieveMultiple(query);
+
+            int maxClin = 0;
+
+            foreach (Entity line in existingLines.Entities)
+            {
+                string clinValue = line.GetAttributeValue<string>("new_clintotal");
+
+                if (string.IsNullOrWhiteSpace(clinValue))
+                {
+                    continue;
+                }
+
+                if (int.TryParse(clinValue, out int currentClin) && currentClin > maxClin)
+                {
+                    maxClin = currentClin;
+                }
+            }
+
+            int nextClin = maxClin + 1;
+
+            target["new_clintotal"] = nextClin.ToString("D4");
+
+            tracingService.Trace($"Generated CLIN number: {nextClin.ToString("D4")}");
+        }
+    }
+}
