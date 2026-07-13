@@ -1,0 +1,179 @@
+Logs:
+Entered
+95b6b2c3-9748-f111-bec7-000d3a139370                  updateQueueTrue
+Count0
+Count0
+
+
+Plugin Code:
+//using ACE.CRM.Base;
+using ACE.CRM.SLMS.Base;
+using ACE.CRM.SLMS.Plugins;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using System;
+using static ACE.CRM.SLMS.Base.BusinessCalender;
+
+namespace ACE.CRM.Plugins.Plugins.Case
+{
+    public class Incident1
+    {
+        public const string logicalname = "incident";
+        public const string incidentid = "incidentid";
+        public const string title = "title";
+        public const string subject = "subject";
+        public const string ace_resolvecase = "ace_resolvecase";
+        public const string customerid = "customerid";
+        public const string ownerid = "ownerid";
+        public const string createdby = "createdby";
+        public const string po_assignedon = "po_assignedon";
+        public const string statecode = "statecode";
+        public const string statuscode = "statuscode";
+        public const string ace_inquiryid = "ace_inquiryid";
+        public const string createdon = "createdon";
+        public const string po_resolvedon = "po_resolvedon";
+        public const string incomingQueue = "ace_incomingqueue";
+        public const string updateQueue = "ace_updatequeue";
+
+        public enum MarkAs
+        {
+            ProblemSolved = 805290000,
+            InformationProvided = 805290001
+        }
+    }
+
+    public class UpdatetheQueueInCase : BasePlugin
+    {
+        protected override void ExecuteMethod(IServiceProvider serviceProvider)
+        {
+            if (context.MessageName.Equals(Constants.Plugin.MessageName.Update))
+            {
+                Common.CreateTrace("ExecuteMethod", "Entered", tracingService);
+
+                Entity postImage = context.PostEntityImages["PostImage"] as Entity;
+                Entity target = context.InputParameters["Target"] as Entity;
+
+                Common.CreateTrace(
+                    "ExecuteMethod",
+                    $"{postImage.Id} updateQueue {postImage.GetAttributeValue<bool>(Incident1.updateQueue)}",
+                    tracingService
+                );
+
+                if (postImage.Id != Guid.Empty &&
+                    postImage.GetAttributeValue<bool>(Incident1.updateQueue))
+                {
+                    #region SSC Emails
+
+                    QueryExpression sscQuery = new QueryExpression("email")
+                    {
+                        ColumnSet = new ColumnSet("subject", "regardingobjectid")
+                    };
+
+                    sscQuery.Criteria.AddCondition(
+                        "regardingobjectid",
+                        ConditionOperator.Equal,
+                        postImage.Id
+                    );
+
+                    FilterExpression sscRecipientsFilter =
+                        new FilterExpression(LogicalOperator.Or);
+
+                    sscRecipientsFilter.AddCondition(
+                        "torecipients",
+                        ConditionOperator.Equal,
+                        "acestudentservicesqa@ace.edu;"
+                    );
+
+                    sscRecipientsFilter.AddCondition(
+                        "torecipients",
+                        ConditionOperator.Equal,
+                        "support@ace.edu;"
+                    );
+
+                    sscQuery.Criteria.AddFilter(sscRecipientsFilter);
+
+                    EntityCollection eSSC =
+                        orgService.RetrieveMultiple(sscQuery);
+
+                    Common.CreateTrace(
+                        "ExecuteMethod",
+                        $"SSC Count {eSSC.Entities.Count}",
+                        tracingService
+                    );
+
+                    if (eSSC.Entities.Count > 0)
+                    {
+                        // update the queue as service queue
+                        postImage[Incident1.incomingQueue] =
+                            new OptionSetValue(936710000);
+                    }
+
+                    #endregion
+
+                    #region Bursar Emails
+
+                    QueryExpression bursarQuery = new QueryExpression("email")
+                    {
+                        ColumnSet = new ColumnSet("ownerid")
+                    };
+
+                    bursarQuery.Criteria.AddCondition(
+                        "regardingobjectid",
+                        ConditionOperator.Equal,
+                        postImage.Id
+                    );
+
+                    FilterExpression bursarRecipientsFilter =
+                        new FilterExpression(LogicalOperator.Or);
+
+                    bursarRecipientsFilter.AddCondition(
+                        "torecipients",
+                        ConditionOperator.Equal,
+                        "acebursarqa@ace.edu;"
+                    );
+
+                    bursarRecipientsFilter.AddCondition(
+                        "torecipients",
+                        ConditionOperator.Equal,
+                        "bursar@ace.edu;"
+                    );
+
+                    bursarQuery.Criteria.AddFilter(bursarRecipientsFilter);
+
+                    EntityCollection eBursar =
+                        orgService.RetrieveMultiple(bursarQuery);
+
+                    Common.CreateTrace(
+                        "ExecuteMethod",
+                        $"Bursar Count {eBursar.Entities.Count}",
+                        tracingService
+                    );
+
+                    if (eBursar.Entities.Count > 0)
+                    {
+                        // update the queue as bursar queue
+                        postImage[Incident1.incomingQueue] =
+                            new OptionSetValue(936710001);
+                    }
+
+                    #endregion
+
+                    postImage[Incident1.updateQueue] = false;
+                    orgService.Update(postImage);
+                }
+            }
+
+            if (context.MessageName.Equals(Constants.Plugin.MessageName.Create))
+            {
+                if (TargetEntity == null) return;
+
+                if (TargetEntity.Id != Guid.Empty &&
+                    TargetEntity.GetAttributeValue<bool>(Incident1.updateQueue) == false)
+                {
+                    TargetEntity[Incident1.updateQueue] = true;
+                    orgService.Update(TargetEntity);
+                }
+            }
+        }
+    }
+}
